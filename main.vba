@@ -1,9 +1,3 @@
-'=======================================================================================
-' Full VBA Code File: This file processes rows from the "PCI Differences" sheet,
-' retrieves coordinates from the "Shapefile Data" sheet, calls the Mapillary API,
-' and extracts various pieces of data including the image date.
-'=======================================================================================
-
 Sub Button1_Click()
     Dim wsPCI As Worksheet, wsShp As Worksheet, wsOutput As Worksheet
     Dim lastRowPCI As Long, i As Long, outputRow As Long
@@ -12,9 +6,7 @@ Sub Button1_Click()
     Dim latValue As Variant, lonValue As Variant
     Dim shpStreetSecCol As Long, shpLatCol As Long, shpLonCol As Long
     Dim pciStreetIDCol As Long, pciSectionIDCol As Long, diffCol As Long
-    Dim mapillaryResponse As String
-    Dim mapillaryResponseCol As Long, mapillaryURLCol As Long, mapillaryCoordsCol As Long
-    Dim mapillaryLatCol As Long, mapillaryLonCol As Long, mapillaryDateCol As Long
+    Dim mapillaryURLCol As Long, mapillaryDateCol As Long, mapillaryLatCol As Long, mapillaryLonCol As Long
     Dim threshold As Variant
     Dim diffValue As Double
     Dim useConcatForStreetSec As Boolean
@@ -24,8 +16,8 @@ Sub Button1_Click()
     Dim sourceCol As Variant
     Dim col As Long
 
-    ' Define columns to include (A to G, K, L, and N)
-    columnsToInclude = Array(1, 2, 3, 4, 5, 6, 7, 11, 12, 14)  ' Added 14 for column N
+    ' Define columns to include (A to G, K, L)
+    columnsToInclude = Array(1, 2, 3, 4, 5, 6, 7, 11, 12)
 
     ' Variables for batching API calls
     Dim apiCallCount As Long
@@ -36,7 +28,6 @@ Sub Button1_Click()
     ' Get user input for threshold
     threshold = Application.InputBox("Enter the minimum absolute difference value to include:", "Difference Threshold", Type:=1)
     If TypeName(threshold) = "Boolean" Then
-        ' User clicked Cancel
         Exit Sub
     End If
 
@@ -62,27 +53,31 @@ Sub Button1_Click()
     End If
     On Error GoTo 0
 
+    Application.StatusBar = "Initializing..."
+    
     ' Get column numbers from Shapefile Data sheet
     shpStreetSecCol = GetColumnNumber(wsShp, "StreetSec")
     shpLatCol = GetColumnNumber(wsShp, "Lat")
     shpLonCol = GetColumnNumber(wsShp, "Long")
     
-    ' If StreetSec column is missing, use concatenated values from StreetID and SectionID
+    ' If StreetSec column is missing, use concatenated values
     If shpStreetSecCol = 0 Then
         useConcatForStreetSec = True
         shpStreetIDCol = GetColumnNumber(wsShp, "StreetID")
         shpSectionIDCol = GetColumnNumber(wsShp, "SectionID")
         If shpStreetIDCol = 0 Or shpSectionIDCol = 0 Then
             MsgBox "Required columns (StreetID and SectionID) not found in Shapefile Data sheet.", vbExclamation
+            Application.StatusBar = False
             Exit Sub
         End If
     Else
         useConcatForStreetSec = False
     End If
 
-    ' Validate that the remaining required columns exist in Shapefile Data sheet
+    ' Validate columns
     If shpLatCol = 0 Or shpLonCol = 0 Then
         MsgBox "Required columns (Lat or Long) not found in Shapefile Data sheet.", vbExclamation
+        Application.StatusBar = False
         Exit Sub
     End If
 
@@ -91,46 +86,58 @@ Sub Button1_Click()
     pciSectionIDCol = GetColumnNumber(wsPCI, "Section ID")
     diffCol = GetColumnNumber(wsPCI, "Diff")
 
-    ' Validate required columns in PCI Differences sheet
+    ' Validate required columns
     If pciStreetIDCol = 0 Or pciSectionIDCol = 0 Or diffCol = 0 Then
         MsgBox "Required columns not found in PCI Differences sheet.", vbExclamation
+        Application.StatusBar = False
         Exit Sub
     End If
 
-    ' Copy specified column headers from PCI Differences
+    ' Copy headers with special handling for columns F through I
     outputCol = 1
     For Each sourceCol In columnsToInclude
         wsOutput.Cells(1, outputCol).Value = wsPCI.Cells(1, CLng(sourceCol)).Value
+        
+        ' For columns F through I, combine with second row headers
+        If CLng(sourceCol) >= 6 And CLng(sourceCol) <= 9 Then
+            wsOutput.Cells(1, outputCol).Value = wsPCI.Cells(1, CLng(sourceCol)).Value & " " & _
+                                                wsPCI.Cells(2, CLng(sourceCol)).Value
+        End If
+        
         outputCol = outputCol + 1
     Next sourceCol
 
-    ' Add combined headers for columns F through I based on the first two rows of "PCI Differences"
-    For col = 6 To 9 ' Columns F to I
-        wsOutput.Cells(1, col).Value = wsPCI.Cells(1, col).Value & " " & wsPCI.Cells(2, col).Value
-    Next col
-
-    ' Set up new columns in Output sheet - starting after the last copied column
-    mapillaryResponseCol = outputCol
-    mapillaryURLCol = mapillaryResponseCol + 1
-    mapillaryCoordsCol = mapillaryURLCol + 1
-    mapillaryLatCol = mapillaryCoordsCol + 1
+    ' Set up new columns
+    mapillaryURLCol = outputCol
+    mapillaryDateCol = mapillaryURLCol + 1
+    mapillaryLatCol = mapillaryDateCol + 1
     mapillaryLonCol = mapillaryLatCol + 1
-    mapillaryDateCol = mapillaryLonCol + 1
 
     ' Add headers for new columns
-    wsOutput.Cells(1, mapillaryResponseCol).Value = "Mapillary API Response"
     wsOutput.Cells(1, mapillaryURLCol).Value = "Mapillary Image URL"
-    wsOutput.Cells(1, mapillaryCoordsCol).Value = "Image Location (Lon, Lat)"
+    wsOutput.Cells(1, mapillaryDateCol).Value = "Image Date"
     wsOutput.Cells(1, mapillaryLatCol).Value = "Image Latitude"
     wsOutput.Cells(1, mapillaryLonCol).Value = "Image Longitude"
-    wsOutput.Cells(1, mapillaryDateCol).Value = "Image Date"
 
-    ' Find the last row with data in the PCI Differences sheet
+    ' Format headers
+    With wsOutput.Range(wsOutput.Cells(1, 1), wsOutput.Cells(1, mapillaryLonCol))
+        .Font.Bold = True
+        .Interior.Color = RGB(217, 225, 242)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .WrapText = True
+        .RowHeight = 30 ' Adjust row height for wrapped text
+    End With
+
+    ' Find the last row with data
     lastRowPCI = wsPCI.Cells(wsPCI.Rows.Count, pciStreetIDCol).End(xlUp).Row
     outputRow = 2
 
-    ' Process rows in PCI Differences sheet
+    ' Process rows
     For i = 3 To lastRowPCI
+        ' Update status bar
+        Application.StatusBar = "Processing row " & i & " of " & lastRowPCI
+        
         If Not IsEmpty(wsPCI.Cells(i, diffCol)) Then
             diffValue = Abs(wsPCI.Cells(i, diffCol).Value)
             
@@ -142,10 +149,10 @@ Sub Button1_Click()
                 
                 ' Find matching row in Shapefile Data sheet
                 If Not useConcatForStreetSec Then
-                    ' Use the StreetSec column directly
-                    matchRow = Application.Match(key, wsShp.Range(wsShp.Cells(2, shpStreetSecCol), wsShp.Cells(wsShp.Rows.Count, shpStreetSecCol)), 0)
+                    matchRow = Application.Match(key, wsShp.Range(wsShp.Cells(2, shpStreetSecCol), _
+                             wsShp.Cells(wsShp.Rows.Count, shpStreetSecCol)), 0)
                     If Not IsError(matchRow) Then
-                        matchRow = matchRow + 1   ' Adjust since the range started at row 2
+                        matchRow = matchRow + 1
                     End If
                 Else
                     ' Build the matching key using concatenated StreetID and SectionID
@@ -153,7 +160,8 @@ Sub Button1_Click()
                     lastRowShp = wsShp.Cells(wsShp.Rows.Count, shpStreetIDCol).End(xlUp).Row
                     matchRow = 0
                     For shpRow = 2 To lastRowShp
-                        tempKey = Trim(CStr(wsShp.Cells(shpRow, shpStreetIDCol).Value)) & " - " & Trim(CStr(wsShp.Cells(shpRow, shpSectionIDCol).Value))
+                        tempKey = Trim(CStr(wsShp.Cells(shpRow, shpStreetIDCol).Value)) & " - " & _
+                                 Trim(CStr(wsShp.Cells(shpRow, shpSectionIDCol).Value))
                         If tempKey = key Then
                             matchRow = shpRow
                             Exit For
@@ -177,49 +185,77 @@ Sub Button1_Click()
                             outputCol = outputCol + 1
                         Next sourceCol
                         
-                        ' Make the API call and increment the batch counter
+                        ' Make API call
+                        Application.StatusBar = "Making API call for row " & i & " of " & lastRowPCI
+                        
+                        Dim mapillaryResponse As String
                         mapillaryResponse = GetMapillaryResponse(CDbl(latValue), CDbl(lonValue))
-                        apiCallCount = apiCallCount + 1
-                        ' After every batch of API calls, yield and wait to prevent Excel from freezing
-                        If apiCallCount Mod batchSize = 0 Then
-                            DoEvents
-                            Application.Wait Now + TimeValue("00:00:01")
-                        End If
                         
-                        Dim imageId As String, coords As String, imageDate As String
+                        ' Extract data from response
+                        Dim imageId As String, coordinates As String
                         imageId = ExtractMapillaryID(mapillaryResponse)
-                        coords = ExtractCoordinates(mapillaryResponse)
-                        imageDate = ExtractMapillaryDate(mapillaryResponse)
-                        
-                        ' Add Mapillary data to the Output sheet
-                        wsOutput.Cells(outputRow, mapillaryResponseCol).Value = mapillaryResponse
+                        coordinates = ExtractCoordinates(mapillaryResponse)
                         
                         If imageId <> "" Then
-                            Dim coordArray() As String
-                            coordArray = Split(coords, ",")
-                            If UBound(coordArray) = 1 Then
-                                wsOutput.Cells(outputRow, mapillaryCoordsCol).Value = Format(coordArray(0), "0.000000") & ", " & Format(coordArray(1), "0.000000")
-                                wsOutput.Cells(outputRow, mapillaryLatCol).Value = Format(coordArray(1), "0.000000")
-                                wsOutput.Cells(outputRow, mapillaryLonCol).Value = Format(coordArray(0), "0.000000")
-                            End If
                             wsOutput.Cells(outputRow, mapillaryURLCol).Value = "https://www.mapillary.com/app/?focus=photo&pKey=" & imageId
-                            wsOutput.Cells(outputRow, mapillaryDateCol).Value = imageDate
+                            wsOutput.Cells(outputRow, mapillaryDateCol).Value = ExtractMapillaryDate(mapillaryResponse)
+                            
+                            ' Handle coordinates - remove any brackets and clean up the format
+                            If coordinates <> "" Then
+                                Dim coordArray() As String
+                                coordinates = Replace(coordinates, "[", "")
+                                coordinates = Replace(coordinates, "]", "")
+                                coordArray = Split(Trim(coordinates), ",")
+                                If UBound(coordArray) = 1 Then
+                                    wsOutput.Cells(outputRow, mapillaryLonCol).Value = Format(CDbl(Trim(coordArray(0))), "0.000000")
+                                    wsOutput.Cells(outputRow, mapillaryLatCol).Value = Format(CDbl(Trim(coordArray(1))), "0.000000")
+                                End If
+                            End If
                         End If
-                    Else
-                        ' Copy specified columns for invalid coordinates
-                        outputCol = 1
-                        For Each sourceCol In columnsToInclude
-                            wsOutput.Cells(outputRow, outputCol).Value = wsPCI.Cells(i, CLng(sourceCol)).Value
-                            outputCol = outputCol + 1
-                        Next sourceCol
-                        wsOutput.Cells(outputRow, mapillaryResponseCol).Value = "Invalid Coordinates"
+                        
+                        outputRow = outputRow + 1
                     End If
-                    outputRow = outputRow + 1
                 End If
             End If
         End If
+        DoEvents ' Allow UI updates
     Next i
 
+    ' Format the output if we have data
+    If outputRow > 2 Then
+        With wsOutput.Range(wsOutput.Cells(1, 1), wsOutput.Cells(outputRow - 1, mapillaryLonCol))
+            ' Borders
+            .Borders(xlEdgeLeft).LineStyle = xlContinuous
+            .Borders(xlEdgeRight).LineStyle = xlContinuous
+            .Borders(xlEdgeTop).LineStyle = xlContinuous
+            .Borders(xlEdgeBottom).LineStyle = xlContinuous
+            .Borders(xlInsideHorizontal).LineStyle = xlContinuous
+            .Borders(xlInsideVertical).LineStyle = xlContinuous
+            
+            ' General formatting
+            .HorizontalAlignment = xlCenter
+            .VerticalAlignment = xlCenter
+            .WrapText = True
+            
+            ' Alternate row coloring
+            Dim rng As Range
+            For Each rng In .Rows
+                If rng.Row Mod 2 = 0 Then
+                    rng.Interior.Color = RGB(242, 242, 242)
+                End If
+            Next rng
+        End With
+        
+        ' Autofit columns
+        wsOutput.Columns("A:" & Split(wsOutput.Cells(1, mapillaryLonCol).Address, "$")(1)).AutoFit
+        
+        ' Make URL column wider for better visibility
+        wsOutput.Columns(mapillaryURLCol).ColumnWidth = 50
+    End If
+
+    ' Reset status bar
+    Application.StatusBar = False
+    
     ' Show completion message
     If outputRow = 2 Then
         MsgBox "No rows found meeting the difference threshold of " & threshold, vbInformation
@@ -238,7 +274,8 @@ Function GetMapillaryResponse(lat As Double, lon As Double) As String
 
     accessToken = "MLY|9441786265842838|7f6f0c2a2d6a89b3aa725bdd2cb34fd0"
     url = "https://graph.mapillary.com/images?access_token=" & accessToken & _
-          "&fields=id,geometry,captured_at&bbox=" & lon - 0.001 & "," & lat - 0.001 & "," & lon + 0.001 & "," & lat + 0.001 & "&limit=1"
+          "&fields=id,geometry,captured_at&bbox=" & lon - 0.001 & "," & lat - 0.001 & "," & _
+          lon + 0.001 & "," & lat + 0.001 & "&limit=1"
 
     Set httpReq = CreateObject("WinHttp.WinHttpRequest.5.1")
     On Error Resume Next
@@ -286,10 +323,6 @@ End Function
 '=======================================================================================
 ' Function: ExtractMapillaryDate
 ' Purpose: Extracts and converts the 'captured_at' field from the JSON API response.
-' Modification:
-'   - Previously, the function attempted to convert a numeric timestamp.
-'   - Now, it correctly extracts the ISO 8601 date string (e.g., "2021-10-15T13:45:20Z"),
-'     replaces the "T" with a space and removes the "Z", then converts it using CDate.
 '=======================================================================================
 Function ExtractMapillaryDate(jsonResponse As String) As String
     Dim startPos As Long, endPos As Long
@@ -344,7 +377,6 @@ Function ExtractMapillaryDate(jsonResponse As String) As String
     End If
 End Function
 
-
 '=======================================================================================
 ' Function: GetColumnNumber
 ' Purpose: Returns the column number for the header matching headerName in the first row.
@@ -359,6 +391,3 @@ Function GetColumnNumber(ws As Worksheet, headerName As String) As Long
     Next cell
     GetColumnNumber = 0
 End Function
-
-
-
