@@ -6,7 +6,8 @@ Sub Button1_Click()
     Dim latValue As Variant, lonValue As Variant
     Dim shpStreetSecCol As Long, shpLatCol As Long, shpLonCol As Long
     Dim pciStreetIDCol As Long, pciSectionIDCol As Long, diffCol As Long
-    Dim mapillaryURLCol As Long, mapillaryDateCol As Long, mapillaryLatCol As Long, mapillaryLonCol As Long
+    Dim mapillaryURLCol As Long, mapillaryDateCol As Long
+    Dim mapillaryLatCol As Long, mapillaryLonCol As Long
     Dim threshold As Variant
     Dim diffValue As Double
     Dim useConcatForStreetSec As Boolean
@@ -15,44 +16,45 @@ Sub Button1_Click()
     Dim outputCol As Long
     Dim sourceCol As Variant
     Dim col As Long
-
-    ' Define columns to include (A to G, K, L)
-    columnsToInclude = Array(1, 2, 3, 4, 5, 6, 7, 11, 12)
-
+    
+    ' Define columns to include (A to G, K, L, and N)
+    columnsToInclude = Array(1, 2, 3, 4, 5, 6, 7, 11, 12, 14)
+    
     ' Variables for batching API calls
     Dim apiCallCount As Long
     Dim batchSize As Long
     batchSize = 15   ' Adjust the batch size as needed
     apiCallCount = 0
-
+    
     ' Get user input for threshold
-    threshold = Application.InputBox("Enter the minimum absolute difference value to include:", "Difference Threshold", Type:=1)
+    threshold = Application.InputBox("Enter the minimum difference value to include (NOT absolute):", _
+                                    "Difference Threshold", Type:=1)
     If TypeName(threshold) = "Boolean" Then
         Exit Sub
     End If
-
+    
     ' Set worksheets
     On Error Resume Next
     Set wsPCI = ThisWorkbook.Worksheets("PCI Differences")
     Set wsShp = ThisWorkbook.Worksheets("Shapefile Data")
     On Error GoTo 0
-
+    
     If wsPCI Is Nothing Or wsShp Is Nothing Then
         MsgBox "Required sheets not found!", vbCritical
         Exit Sub
     End If
-
+    
     ' Create or clear Output sheet
     On Error Resume Next
     Set wsOutput = ThisWorkbook.Worksheets("Output")
     If wsOutput Is Nothing Then
         Set wsOutput = ThisWorkbook.Worksheets.Add
-        wsOutput.Name = "Output"
+        wsOutput.name = "Output"
     Else
         wsOutput.Cells.Clear
     End If
     On Error GoTo 0
-
+    
     Application.StatusBar = "Initializing..."
     
     ' Get column numbers from Shapefile Data sheet
@@ -73,52 +75,57 @@ Sub Button1_Click()
     Else
         useConcatForStreetSec = False
     End If
-
+    
     ' Validate columns
     If shpLatCol = 0 Or shpLonCol = 0 Then
         MsgBox "Required columns (Lat or Long) not found in Shapefile Data sheet.", vbExclamation
         Application.StatusBar = False
         Exit Sub
     End If
-
+    
     ' Get column numbers from PCI Differences sheet
     pciStreetIDCol = GetColumnNumber(wsPCI, "Street ID")
     pciSectionIDCol = GetColumnNumber(wsPCI, "Section ID")
     diffCol = GetColumnNumber(wsPCI, "Diff")
-
+    
     ' Validate required columns
     If pciStreetIDCol = 0 Or pciSectionIDCol = 0 Or diffCol = 0 Then
         MsgBox "Required columns not found in PCI Differences sheet.", vbExclamation
         Application.StatusBar = False
         Exit Sub
     End If
-
-    ' Copy headers with special handling for columns F through I
+    
+    ' Copy headers with special handling for certain columns
     outputCol = 1
     For Each sourceCol In columnsToInclude
-        wsOutput.Cells(1, outputCol).Value = wsPCI.Cells(1, CLng(sourceCol)).Value
         
-        ' For columns F through I, combine with second row headers
-        If CLng(sourceCol) >= 6 And CLng(sourceCol) <= 9 Then
-            wsOutput.Cells(1, outputCol).Value = wsPCI.Cells(1, CLng(sourceCol)).Value & " " & _
-                                                wsPCI.Cells(2, CLng(sourceCol)).Value
+        ' --- START of "combine row1 + row2" logic
+        ' We used to do this for columns 6..9 (F..I).
+        ' Now let's also do it for columns 11..12 (K..L).
+        If (CLng(sourceCol) >= 6 And CLng(sourceCol) <= 9) Or _
+           (CLng(sourceCol) >= 11 And CLng(sourceCol) <= 12) Then
+            wsOutput.Cells(1, outputCol).value = wsPCI.Cells(1, CLng(sourceCol)).value & " " & _
+                                                wsPCI.Cells(2, CLng(sourceCol)).value
+        Else
+            wsOutput.Cells(1, outputCol).value = wsPCI.Cells(1, CLng(sourceCol)).value
         End If
+        ' --- END of "combine row1 + row2" logic
         
         outputCol = outputCol + 1
     Next sourceCol
-
+    
     ' Set up new columns
     mapillaryURLCol = outputCol
     mapillaryDateCol = mapillaryURLCol + 1
     mapillaryLatCol = mapillaryDateCol + 1
     mapillaryLonCol = mapillaryLatCol + 1
-
+    
     ' Add headers for new columns
-    wsOutput.Cells(1, mapillaryURLCol).Value = "Mapillary Image URL"
-    wsOutput.Cells(1, mapillaryDateCol).Value = "Image Date"
-    wsOutput.Cells(1, mapillaryLatCol).Value = "Image Latitude"
-    wsOutput.Cells(1, mapillaryLonCol).Value = "Image Longitude"
-
+    wsOutput.Cells(1, mapillaryURLCol).value = "Mapillary Image URL"
+    wsOutput.Cells(1, mapillaryDateCol).value = "Image Date"
+    wsOutput.Cells(1, mapillaryLatCol).value = "Image Latitude"
+    wsOutput.Cells(1, mapillaryLonCol).value = "Image Longitude"
+    
     ' Format headers
     With wsOutput.Range(wsOutput.Cells(1, 1), wsOutput.Cells(1, mapillaryLonCol))
         .Font.Bold = True
@@ -128,23 +135,23 @@ Sub Button1_Click()
         .WrapText = True
         .RowHeight = 30 ' Adjust row height for wrapped text
     End With
-
+    
     ' Find the last row with data
     lastRowPCI = wsPCI.Cells(wsPCI.Rows.Count, pciStreetIDCol).End(xlUp).Row
     outputRow = 2
-
+    
     ' Process rows
     For i = 3 To lastRowPCI
         ' Update status bar
         Application.StatusBar = "Processing row " & i & " of " & lastRowPCI
         
         If Not IsEmpty(wsPCI.Cells(i, diffCol)) Then
-            diffValue = Abs(wsPCI.Cells(i, diffCol).Value)
+            diffValue = wsPCI.Cells(i, diffCol).value
             
             If diffValue >= threshold Then
                 ' Get the key from PCI sheet
-                streetID = Trim(CStr(wsPCI.Cells(i, pciStreetIDCol).Value))
-                sectionID = Trim(CStr(wsPCI.Cells(i, pciSectionIDCol).Value))
+                streetID = Trim(CStr(wsPCI.Cells(i, pciStreetIDCol).value))
+                sectionID = Trim(CStr(wsPCI.Cells(i, pciSectionIDCol).value))
                 key = streetID & " - " & sectionID
                 
                 ' Find matching row in Shapefile Data sheet
@@ -160,8 +167,8 @@ Sub Button1_Click()
                     lastRowShp = wsShp.Cells(wsShp.Rows.Count, shpStreetIDCol).End(xlUp).Row
                     matchRow = 0
                     For shpRow = 2 To lastRowShp
-                        tempKey = Trim(CStr(wsShp.Cells(shpRow, shpStreetIDCol).Value)) & " - " & _
-                                 Trim(CStr(wsShp.Cells(shpRow, shpSectionIDCol).Value))
+                        tempKey = Trim(CStr(wsShp.Cells(shpRow, shpStreetIDCol).value)) & " - " & _
+                                  Trim(CStr(wsShp.Cells(shpRow, shpSectionIDCol).value))
                         If tempKey = key Then
                             matchRow = shpRow
                             Exit For
@@ -174,14 +181,14 @@ Sub Button1_Click()
                 
                 ' If a match is found, retrieve the latitude and longitude
                 If Not IsError(matchRow) Then
-                    latValue = wsShp.Cells(matchRow, shpLatCol).Value
-                    lonValue = wsShp.Cells(matchRow, shpLonCol).Value
+                    latValue = wsShp.Cells(matchRow, shpLatCol).value
+                    lonValue = wsShp.Cells(matchRow, shpLonCol).value
                     
                     If IsNumeric(latValue) And IsNumeric(lonValue) Then
                         ' Copy specified columns from PCI Differences
                         outputCol = 1
                         For Each sourceCol In columnsToInclude
-                            wsOutput.Cells(outputRow, outputCol).Value = wsPCI.Cells(i, CLng(sourceCol)).Value
+                            wsOutput.Cells(outputRow, outputCol).value = wsPCI.Cells(i, CLng(sourceCol)).value
                             outputCol = outputCol + 1
                         Next sourceCol
                         
@@ -197,8 +204,9 @@ Sub Button1_Click()
                         coordinates = ExtractCoordinates(mapillaryResponse)
                         
                         If imageId <> "" Then
-                            wsOutput.Cells(outputRow, mapillaryURLCol).Value = "https://www.mapillary.com/app/?focus=photo&pKey=" & imageId
-                            wsOutput.Cells(outputRow, mapillaryDateCol).Value = ExtractMapillaryDate(mapillaryResponse)
+                            wsOutput.Cells(outputRow, mapillaryURLCol).value = _
+                                "https://www.mapillary.com/app/?focus=photo&pKey=" & imageId
+                            wsOutput.Cells(outputRow, mapillaryDateCol).value = ExtractMapillaryDate(mapillaryResponse)
                             
                             ' Handle coordinates - remove any brackets and clean up the format
                             If coordinates <> "" Then
@@ -207,8 +215,10 @@ Sub Button1_Click()
                                 coordinates = Replace(coordinates, "]", "")
                                 coordArray = Split(Trim(coordinates), ",")
                                 If UBound(coordArray) = 1 Then
-                                    wsOutput.Cells(outputRow, mapillaryLonCol).Value = Format(CDbl(Trim(coordArray(0))), "0.000000")
-                                    wsOutput.Cells(outputRow, mapillaryLatCol).Value = Format(CDbl(Trim(coordArray(1))), "0.000000")
+                                    wsOutput.Cells(outputRow, mapillaryLonCol).value = _
+                                        Format(CDbl(Trim(coordArray(0))), "0.000000")
+                                    wsOutput.Cells(outputRow, mapillaryLatCol).value = _
+                                        Format(CDbl(Trim(coordArray(1))), "0.000000")
                                 End If
                             End If
                         End If
@@ -220,7 +230,7 @@ Sub Button1_Click()
         End If
         DoEvents ' Allow UI updates
     Next i
-
+    
     ' Format the output if we have data
     If outputRow > 2 Then
         With wsOutput.Range(wsOutput.Cells(1, 1), wsOutput.Cells(outputRow - 1, mapillaryLonCol))
@@ -252,7 +262,7 @@ Sub Button1_Click()
         ' Make URL column wider for better visibility
         wsOutput.Columns(mapillaryURLCol).ColumnWidth = 50
     End If
-
+    
     ' Reset status bar
     Application.StatusBar = False
     
@@ -384,10 +394,12 @@ End Function
 Function GetColumnNumber(ws As Worksheet, headerName As String) As Long
     Dim cell As Range
     For Each cell In ws.Range("1:1")
-        If Trim(cell.Value) = headerName Then
+        If Trim(cell.value) = headerName Then
             GetColumnNumber = cell.Column
             Exit Function
         End If
     Next cell
     GetColumnNumber = 0
 End Function
+
+
