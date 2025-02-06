@@ -13,6 +13,7 @@ Sub Button1_Click()
     Dim mapillaryURLCol As Long, mapillaryDateCol As Long
     Dim mapillaryLatCol As Long, mapillaryLonCol As Long
     Dim shpLatOutputCol As Long, shpLonOutputCol As Long
+    Dim distanceCol As Long
     
     ' Thresholds
     Dim negativeThreshold As Variant    ' Include if Diff <= negativeThreshold
@@ -25,31 +26,30 @@ Sub Button1_Click()
     Dim useConcatForStreetSec As Boolean
     Dim shpStreetIDCol As Long, shpSectionIDCol As Long
     
-    ' We now include columns 8,9,10 (M&R Date, M&R Treatment Name, M&R PCI)
-    ' along with A..G (1..7), K,L,N (11,12,14)
+    ' Columns to copy from PCI Differences (edit as needed)
+    ' We now include columns 8, 9, 10 (M&R Date, M&R Treatment Name, M&R PCI),
+    ' along with A..G (1..7), K, L, N (11,12,14)
     Dim columnsToInclude As Variant
     columnsToInclude = Array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14)
     
     Dim outputCol As Long
     Dim sourceCol As Variant
     
-    ' 1) Ask user for negative threshold
+    ' Prompt user for thresholds
     negativeThreshold = Application.InputBox( _
         Prompt:="Enter the negative threshold (rows = this value will be included):", _
         Title:="Negative Threshold", Type:=1)
-    If TypeName(negativeThreshold) = "Boolean" Then Exit Sub  ' Cancel
+    If TypeName(negativeThreshold) = "Boolean" Then Exit Sub  ' canceled
     
-    ' 2) Ask user for positive threshold
     positiveThreshold = Application.InputBox( _
         Prompt:="Enter the positive threshold (rows = this value will be included):", _
         Title:="Positive Threshold", Type:=1)
-    If TypeName(positiveThreshold) = "Boolean" Then Exit Sub  ' Cancel
+    If TypeName(positiveThreshold) = "Boolean" Then Exit Sub  ' canceled
     
-    ' 3) Ask "Yes/No" if we only want no-work-history rows for the positive threshold
     onlyNoWorkHistory = Application.InputBox( _
         Prompt:="Do you want to ONLY include rows above the positive threshold that have NO work history? (Yes/No)", _
         Title:="Filter By Work History?", Type:=2)
-    If TypeName(onlyNoWorkHistory) = "Boolean" Then Exit Sub  ' Cancel
+    If TypeName(onlyNoWorkHistory) = "Boolean" Then Exit Sub  ' canceled
     
     onlyNoWorkHistory = UCase(Trim(onlyNoWorkHistory))
     If onlyNoWorkHistory <> "YES" And onlyNoWorkHistory <> "NO" Then
@@ -57,7 +57,7 @@ Sub Button1_Click()
         Exit Sub
     End If
     
-    ' Set worksheets
+    ' Identify worksheets
     On Error Resume Next
     Set wsPCI = ThisWorkbook.Worksheets("PCI Differences")
     Set wsShp = ThisWorkbook.Worksheets("Shapefile Data")
@@ -68,12 +68,12 @@ Sub Button1_Click()
         Exit Sub
     End If
     
-    ' Create or clear Output sheet
+    ' Create or clear "Output" sheet
     On Error Resume Next
     Set wsOutput = ThisWorkbook.Worksheets("Output")
     If wsOutput Is Nothing Then
         Set wsOutput = ThisWorkbook.Worksheets.Add
-        wsOutput.name = "Output"
+        wsOutput.Name = "Output"
     Else
         wsOutput.Cells.Clear
     End If
@@ -81,12 +81,12 @@ Sub Button1_Click()
     
     Application.StatusBar = "Initializing..."
     
-    ' Get column numbers from Shapefile Data
+    ' Get column numbers in Shapefile Data
     shpStreetSecCol = GetColumnNumber(wsShp, "StreetSec")
     shpLatCol = GetColumnNumber(wsShp, "Lat")
     shpLonCol = GetColumnNumber(wsShp, "Long")
     
-    ' If StreetSec not found, we must concatenate StreetID+SectionID
+    ' If there's no combined "StreetSec" column, we do the 2-column approach
     If shpStreetSecCol = 0 Then
         useConcatForStreetSec = True
         shpStreetIDCol = GetColumnNumber(wsShp, "StreetID")
@@ -99,13 +99,12 @@ Sub Button1_Click()
         useConcatForStreetSec = False
     End If
     
-    ' Make sure we have Lat/Long
     If shpLatCol = 0 Or shpLonCol = 0 Then
         MsgBox "Could not find columns 'Lat' or 'Long' in Shapefile Data.", vbExclamation
         Exit Sub
     End If
     
-    ' Get PCI Differences columns: Street ID, Section ID, Diff
+    ' Get necessary columns in PCI Differences
     pciStreetIDCol = GetColumnNumber(wsPCI, "Street ID")
     pciSectionIDCol = GetColumnNumber(wsPCI, "Section ID")
     diffCol = GetColumnNumber(wsPCI, "Diff")
@@ -115,40 +114,44 @@ Sub Button1_Click()
         Exit Sub
     End If
     
-    ' Copy headers
+    ' Copy headers to Output
     outputCol = 1
     For Each sourceCol In columnsToInclude
-        ' Combine row 1 + row 2 for columns 6..9 and 11..12 if they have multi-row headers
+        ' If row 1 & row 2 in PCI differ for columns 6..9, 11..12, combine them
         If (CLng(sourceCol) >= 6 And CLng(sourceCol) <= 9) Or _
            (CLng(sourceCol) >= 11 And CLng(sourceCol) <= 12) Then
-            wsOutput.Cells(1, outputCol).value = wsPCI.Cells(1, CLng(sourceCol)).value & " " & _
-                                                wsPCI.Cells(2, CLng(sourceCol)).value
+            wsOutput.Cells(1, outputCol).Value = wsPCI.Cells(1, CLng(sourceCol)).Value & " " & _
+                                                wsPCI.Cells(2, CLng(sourceCol)).Value
         Else
-            wsOutput.Cells(1, outputCol).value = wsPCI.Cells(1, CLng(sourceCol)).value
+            wsOutput.Cells(1, outputCol).Value = wsPCI.Cells(1, CLng(sourceCol)).Value
         End If
         outputCol = outputCol + 1
     Next sourceCol
     
-    ' Add two columns for Shapefile Lat/Long
+    ' Add columns for shapefile lat/long
     shpLatOutputCol = outputCol
     shpLonOutputCol = shpLatOutputCol + 1
     
-    wsOutput.Cells(1, shpLatOutputCol).value = "Shapefile Lat"
-    wsOutput.Cells(1, shpLonOutputCol).value = "Shapefile Long"
+    wsOutput.Cells(1, shpLatOutputCol).Value = "Shapefile Lat"
+    wsOutput.Cells(1, shpLonOutputCol).Value = "Shapefile Long"
     
-    ' Then add columns for Mapillary data
+    ' Add columns for Mapillary data
     mapillaryURLCol = shpLonOutputCol + 1
     mapillaryDateCol = mapillaryURLCol + 1
     mapillaryLatCol = mapillaryDateCol + 1
     mapillaryLonCol = mapillaryLatCol + 1
     
-    wsOutput.Cells(1, mapillaryURLCol).value = "Mapillary Image URL"
-    wsOutput.Cells(1, mapillaryDateCol).value = "Image Date"
-    wsOutput.Cells(1, mapillaryLatCol).value = "Image Latitude"
-    wsOutput.Cells(1, mapillaryLonCol).value = "Image Longitude"
+    wsOutput.Cells(1, mapillaryURLCol).Value = "Mapillary Image URL"
+    wsOutput.Cells(1, mapillaryDateCol).Value = "Image Date"
+    wsOutput.Cells(1, mapillaryLatCol).Value = "Image Latitude"
+    wsOutput.Cells(1, mapillaryLonCol).Value = "Image Longitude"
+    
+    ' Finally, a column for Distance
+    distanceCol = mapillaryLonCol + 1
+    wsOutput.Cells(1, distanceCol).Value = "Distance (Miles)"
     
     ' Format header row
-    With wsOutput.Range(wsOutput.Cells(1, 1), wsOutput.Cells(1, mapillaryLonCol))
+    With wsOutput.Range(wsOutput.Cells(1, 1), wsOutput.Cells(1, distanceCol))
         .Font.Bold = True
         .Interior.Color = RGB(217, 225, 242)
         .HorizontalAlignment = xlCenter
@@ -165,43 +168,46 @@ Sub Button1_Click()
     For i = 3 To lastRowPCI
         Application.StatusBar = "Processing row " & i & " of " & lastRowPCI
         If Not IsEmpty(wsPCI.Cells(i, diffCol)) Then
-            diffValue = wsPCI.Cells(i, diffCol).value
+            diffValue = wsPCI.Cells(i, diffCol).Value
             
-            ' Condition 1: Diff <= negativeThreshold
+            ' Condition 1: <= negativeThreshold
             Dim condition1 As Boolean
             condition1 = (diffValue <= negativeThreshold)
             
-            ' Condition 2: Diff >= positiveThreshold
+            ' Condition 2: >= positiveThreshold
             Dim condition2 As Boolean
             If onlyNoWorkHistory = "YES" Then
-                ' Must also have H, I, J empty
+                ' Must also have M&R columns empty
                 condition2 = (diffValue >= positiveThreshold) And _
-                             IsEmpty(wsPCI.Cells(i, 8).value) And _
-                             IsEmpty(wsPCI.Cells(i, 9).value) And _
-                             IsEmpty(wsPCI.Cells(i, 10).value)
+                             IsEmpty(wsPCI.Cells(i, 8).Value) And _
+                             IsEmpty(wsPCI.Cells(i, 9).Value) And _
+                             IsEmpty(wsPCI.Cells(i, 10).Value)
             Else
                 condition2 = (diffValue >= positiveThreshold)
             End If
             
+            ' If row qualifies
             If condition1 Or condition2 Then
-                ' Build key StreetID - SectionID
-                streetID = Trim(CStr(wsPCI.Cells(i, pciStreetIDCol).value))
-                sectionID = Trim(CStr(wsPCI.Cells(i, pciSectionIDCol).value))
+                ' Build key (StreetID - SectionID)
+                streetID = Trim(CStr(wsPCI.Cells(i, pciStreetIDCol).Value))
+                sectionID = Trim(CStr(wsPCI.Cells(i, pciSectionIDCol).Value))
                 key = streetID & " - " & sectionID
                 
-                ' Match in Shapefile Data
+                ' Attempt to find a match in Shapefile Data
                 If Not useConcatForStreetSec Then
+                    ' If there's a "StreetSec" column
                     matchRow = Application.Match(key, _
                                 wsShp.Range(wsShp.Cells(2, shpStreetSecCol), _
                                             wsShp.Cells(wsShp.Rows.Count, shpStreetSecCol)), 0)
                     If Not IsError(matchRow) Then matchRow = matchRow + 1
                 Else
+                    ' Otherwise, manually search StreetID+SectionID
                     Dim shpRow As Long, lastRowShp As Long, tempKey As String
                     lastRowShp = wsShp.Cells(wsShp.Rows.Count, shpStreetIDCol).End(xlUp).Row
                     matchRow = 0
                     For shpRow = 2 To lastRowShp
-                        tempKey = Trim(CStr(wsShp.Cells(shpRow, shpStreetIDCol).value)) & " - " & _
-                                  Trim(CStr(wsShp.Cells(shpRow, shpSectionIDCol).value))
+                        tempKey = Trim(CStr(wsShp.Cells(shpRow, shpStreetIDCol).Value)) & " - " & _
+                                  Trim(CStr(wsShp.Cells(shpRow, shpSectionIDCol).Value))
                         If tempKey = key Then
                             matchRow = shpRow
                             Exit For
@@ -210,26 +216,26 @@ Sub Button1_Click()
                     If matchRow = 0 Then matchRow = CVErr(xlErrNA)
                 End If
                 
-                ' If we found a matching shapefile row
+                ' If found a matching shapefile row
                 If Not IsError(matchRow) Then
-                    latValue = wsShp.Cells(matchRow, shpLatCol).value
-                    lonValue = wsShp.Cells(matchRow, shpLonCol).value
+                    latValue = wsShp.Cells(matchRow, shpLatCol).Value
+                    lonValue = wsShp.Cells(matchRow, shpLonCol).Value
                     
                     If IsNumeric(latValue) And IsNumeric(lonValue) Then
-                        ' Copy the requested columns from PCI Differences
+                        ' Copy columns from PCI Differences
                         Dim colIndex As Long
                         outputCol = 1
                         For Each sourceCol In columnsToInclude
-                            wsOutput.Cells(outputRow, outputCol).value = _
-                                wsPCI.Cells(i, CLng(sourceCol)).value
+                            wsOutput.Cells(outputRow, outputCol).Value = _
+                                wsPCI.Cells(i, CLng(sourceCol)).Value
                             outputCol = outputCol + 1
                         Next sourceCol
                         
-                        ' Put shapefile Lat/Long
-                        wsOutput.Cells(outputRow, shpLatOutputCol).value = latValue
-                        wsOutput.Cells(outputRow, shpLonOutputCol).value = lonValue
+                        ' Write Shapefile Lat/Long
+                        wsOutput.Cells(outputRow, shpLatOutputCol).Value = latValue
+                        wsOutput.Cells(outputRow, shpLonOutputCol).Value = lonValue
                         
-                        ' Mapillary API call
+                        ' Mapillary API call (optional)
                         Application.StatusBar = "Making API call for row " & i & " of " & lastRowPCI
                         Dim mapillaryResponse As String
                         mapillaryResponse = GetMapillaryResponse(CDbl(latValue), CDbl(lonValue))
@@ -240,33 +246,53 @@ Sub Button1_Click()
                         coordinates = ExtractCoordinates(mapillaryResponse)
                         
                         If imageId <> "" Then
-                            wsOutput.Cells(outputRow, mapillaryURLCol).value = _
+                            ' Write Mapillary link
+                            wsOutput.Cells(outputRow, mapillaryURLCol).Value = _
                                 "https://www.mapillary.com/app/?focus=photo&pKey=" & imageId
                             
-                            ' Hyperlink
+                            ' Make the URL a clickable hyperlink
                             wsOutput.Cells(outputRow, mapillaryURLCol).Hyperlinks.Add _
                                 Anchor:=wsOutput.Cells(outputRow, mapillaryURLCol), _
-                                Address:=wsOutput.Cells(outputRow, mapillaryURLCol).value, _
-                                TextToDisplay:=wsOutput.Cells(outputRow, mapillaryURLCol).value
+                                Address:=wsOutput.Cells(outputRow, mapillaryURLCol).Value, _
+                                TextToDisplay:=wsOutput.Cells(outputRow, mapillaryURLCol).Value
                             
-                            ' Date
-                            wsOutput.Cells(outputRow, mapillaryDateCol).value = _
+                            ' Write date
+                            wsOutput.Cells(outputRow, mapillaryDateCol).Value = _
                                 ExtractMapillaryDate(mapillaryResponse)
                             
-                            ' Mapillary lon/lat
+                            ' Parse mapillary coordinates
                             If coordinates <> "" Then
                                 Dim coordArray() As String
                                 coordinates = Replace(coordinates, "[", "")
                                 coordinates = Replace(coordinates, "]", "")
                                 coordArray = Split(Trim(coordinates), ",")
+                                
+                                ' Mapillary returns [longitude, latitude]
                                 If UBound(coordArray) = 1 Then
-                                    wsOutput.Cells(outputRow, mapillaryLonCol).value = _
-                                        Format(CDbl(Trim(coordArray(0))), "0.000000")
-                                    wsOutput.Cells(outputRow, mapillaryLatCol).value = _
-                                        Format(CDbl(Trim(coordArray(1))), "0.000000")
+                                    Dim mapLon As Double, mapLat As Double
+                                    
+                                    mapLon = CDbl(Trim(coordArray(0)))
+                                    mapLat = CDbl(Trim(coordArray(1)))
+                                    
+                                    ' Place them in the correct columns
+                                    wsOutput.Cells(outputRow, mapillaryLonCol).Value = _
+                                        Format(mapLon, "0.000000")
+                                    wsOutput.Cells(outputRow, mapillaryLatCol).Value = _
+                                        Format(mapLat, "0.000000")
+                                    
+                                    ' Now compute the distance properly:
+                                    ' HaversineDistanceMiles( shapefile_lat, shapefile_long,
+                                    '                         mapLat,        mapLon )
+                                    wsOutput.Cells(outputRow, distanceCol).Value = _
+                                        HaversineDistanceMiles(CDbl(latValue), CDbl(lonValue), _
+                                                               mapLat, mapLon)
                                 End If
                             End If
+                        Else
+                            ' If no image found
+                            wsOutput.Cells(outputRow, distanceCol).Value = "N/A"
                         End If
+                        
                         outputRow = outputRow + 1
                     End If
                 End If
@@ -292,7 +318,7 @@ Sub Button1_Click()
     
     ' If we actually copied rows
     If outputRow > 2 Then
-        With wsOutput.Range(wsOutput.Cells(1, 1), wsOutput.Cells(outputRow - 1, mapillaryLonCol))
+        With wsOutput.Range(wsOutput.Cells(1, 1), wsOutput.Cells(outputRow - 1, distanceCol))
             ' Borders
             .Borders(xlEdgeLeft).LineStyle = xlContinuous
             .Borders(xlEdgeRight).LineStyle = xlContinuous
@@ -316,9 +342,8 @@ Sub Button1_Click()
         End With
         
         ' Autofit
-        wsOutput.Columns("A:" & Split(wsOutput.Cells(1, mapillaryLonCol).Address, "$")(1)).AutoFit
-        ' Widen the Mapillary URL column
-        wsOutput.Columns(mapillaryURLCol).ColumnWidth = 50
+        wsOutput.Columns("A:" & Split(wsOutput.Cells(1, distanceCol).Address, "$")(1)).AutoFit
+        wsOutput.Columns(mapillaryURLCol).ColumnWidth = 50  ' widen Mapillary URL
     End If
     
     Application.StatusBar = False
@@ -373,7 +398,7 @@ End Function
 
 '=======================================================================================
 ' Function: ExtractCoordinates
-' Purpose: Extracts the coordinates (longitude, latitude) from the JSON API response.
+' Purpose: Extracts the coordinates ( [lon, lat] ) from the JSON API response.
 '=======================================================================================
 Function ExtractCoordinates(jsonResponse As String) As String
     Dim startPos As Long, endPos As Long
@@ -421,7 +446,7 @@ Function ExtractMapillaryDate(jsonResponse As String) As String
                 ExtractMapillaryDate = "Date Not Found"
             End If
         Else
-            ' Numeric timestamp in ms
+            ' Could be numeric timestamp in ms
             endPos = startPos
             Do While IsNumeric(Mid(jsonResponse, endPos, 1)) Or Mid(jsonResponse, endPos, 1) = "."
                 endPos = endPos + 1
@@ -447,7 +472,7 @@ End Function
 Function GetColumnNumber(ws As Worksheet, headerName As String) As Long
     Dim cell As Range
     For Each cell In ws.Range("1:1")
-        If Trim(cell.value) = headerName Then
+        If Trim(cell.Value) = headerName Then
             GetColumnNumber = cell.Column
             Exit Function
         End If
@@ -455,4 +480,31 @@ Function GetColumnNumber(ws As Worksheet, headerName As String) As Long
     GetColumnNumber = 0
 End Function
 
+'=======================================================================================
+' Function: HaversineDistanceMiles
+' Purpose: Returns the haversine distance (in miles) between two lat/lon points.
+'=======================================================================================
+Function HaversineDistanceMiles(lat1 As Double, lon1 As Double, lat2 As Double, lon2 As Double) As Double
+    Const RADIUS_EARTH_MILES As Double = 3958.8
+    Dim lat1Rad As Double, lat2Rad As Double
+    Dim dLat As Double, dLon As Double
+    Dim a As Double, c As Double
+    
+    ' Convert degrees to radians
+    lat1Rad = WorksheetFunction.Radians(lat1)
+    lat2Rad = WorksheetFunction.Radians(lat2)
+    dLat = WorksheetFunction.Radians(lat2 - lat1)
+    dLon = WorksheetFunction.Radians(lon2 - lon1)
+    
+    ' Apply Haversine formula
+    a = Sin(dLat / 2) * Sin(dLat / 2) + _
+        Cos(lat1Rad) * Cos(lat2Rad) * _
+        Sin(dLon / 2) * Sin(dLon / 2)
+        
+    ' Use regular arctangent function instead
+    If a > 1 Then a = 1  ' Prevent domain error
+    c = 2 * Atn(Sqr(a) / Sqr(1 - a))
+    
+    HaversineDistanceMiles = RADIUS_EARTH_MILES * c
+End Function
 
